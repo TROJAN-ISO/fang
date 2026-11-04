@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>FANG</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="shell">
+    <nav class="sidebar" aria-label="Main">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 32" aria-hidden="true"><path d="M2 2h20l-6 9-4 19-4-19z"/></svg>
+        <span>FANG</span>
+      </div>
+      <button class="nav-item" data-view="tickets">
+        <span class="nav-title">Tickets</span>
+        <span class="nav-sub" id="nav-tickets-sub">No folder</span>
+      </button>
+      <button class="nav-item" data-view="repos">
+        <span class="nav-title">Repositories</span>
+        <span class="nav-sub" id="nav-repos-sub">No folder</span>
+      </button>
+      <button class="nav-item" data-view="dev">
+        <span class="nav-title">Development</span>
+        <span class="nav-sub" id="nav-dev-sub">Nothing selected</span>
+      </button>
+      <div class="sidebar-foot">
+        <div class="guard">
+          <strong>Never commits. Never pushes.</strong>
+          Every change stays on disk for you to review.
+        </div>
+        <div class="claude-status" id="claude-status">Checking Claude Code…</div>
+        <button class="link-btn" id="open-settings">Settings</button>
+      </div>
+    </nav>
+
+    <main class="main">
+      <section class="view" id="view-tickets"></section>
+      <section class="view" id="view-repos"></section>
+      <section class="view" id="view-dev"></section>
+    </main>
+  </div>
+
+  <dialog id="settings-dialog">
+    <form method="dialog" class="settings-form">
+      <h2>Settings</h2>
+      <label>Claude Code path
+        <input id="set-claude" placeholder="Leave empty to find it automatically">
+      </label>
+      <label>Extra commands Raphael may run
+        <textarea id="set-extra" rows="5" placeholder="One per line, e.g.&#10;php artisan migrate:fresh --env=testing&#10;npm run build"></textarea>
+        <small>Tests, linters and type checks are already allowed. Commits, pushes and dependency installs are always blocked, even if listed here.</small>
+      </label>
+      <label>Max turns per run
+        <input id="set-turns" type="number" min="20" max="500">
+      </label>
+      <div class="row end">
+        <button value="cancel" class="btn ghost">Cancel</button>
+        <button value="save" class="btn primary" id="settings-save">Save settings</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
