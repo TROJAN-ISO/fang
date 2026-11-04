@@ -123,10 +123,10 @@ pre, .pre { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; whit
 /* Development: horizontal phase stepper */
 .stepper { list-style: none; margin: 4px auto 24px; padding: 0; display: flex; justify-content: center; align-items: flex-start; gap: 4px; max-width: 1000px; }
 .step { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.circle { width: 96px; height: 96px; border-radius: 50%; border: 2px solid transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; cursor: pointer; transition: transform .15s ease; }
+.circle { width: 64px; height: 64px; border-radius: 50%; border: 2px solid transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; cursor: pointer; transition: transform .15s ease; }
 .circle:hover:not(:disabled) { transform: scale(1.04); }
-.circle .ph { font-size: 13px; font-weight: 600; letter-spacing: .06em; }
-.circle .pn { font-size: 34px; font-weight: 800; margin-top: 5px; }
+.circle .ph { font-size: 10px; font-weight: 600; letter-spacing: .06em; }
+.circle .pn { font-size: 24px; font-weight: 800; margin-top: 3px; }
 .circle.current { background: var(--primary); color: var(--primary-ink); box-shadow: 0 0 0 4px var(--bg), 0 0 0 6px var(--primary); }
 .circle.done { background: var(--ok); color: var(--ok-ink); }
 .circle.open { background: var(--panel); color: var(--ink); border-color: var(--line); }
@@ -135,16 +135,16 @@ pre, .pre { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; whit
 @keyframes ring { 50% { box-shadow: 0 0 0 4px var(--bg), 0 0 0 9px var(--bone); } }
 .step-name { font-size: 13px; font-weight: 600; color: var(--muted); }
 .step:has(.current) .step-name { color: var(--ink); }
-.chev { margin-top: 31px; }
-.chev svg { width: 34px; height: 34px; fill: none; stroke: var(--line); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.chev { margin-top: 20px; }
+.chev svg { width: 24px; height: 24px; fill: none; stroke: var(--line); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
 .phase-card { max-width: 1000px; margin: 0 auto; }
 .pager { max-width: 1000px; margin: 14px auto 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .pager-pos { color: var(--muted); font-size: 13px; }
 @media (max-width: 1180px) {
-  .circle { width: 76px; height: 76px; }
-  .circle .pn { font-size: 26px; }
-  .chev { margin-top: 21px; }
-  .chev svg { width: 26px; height: 26px; }
+  .circle { width: 56px; height: 56px; }
+  .circle .pn { font-size: 20px; }
+  .chev { margin-top: 18px; }
+  .chev svg { width: 20px; height: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { .circle, .circle.busy { animation: none; transition: none; } }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; }
