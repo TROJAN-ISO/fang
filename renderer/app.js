@@ -53,7 +53,7 @@ function keepFocus(fn) {
 function render() {
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === S.view));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${S.view}`));
-  $('#nav-tickets-sub').textContent = S.settings.ticketsDir ? `${S.tickets.length} tickets · ${base(S.settings.ticketsDir)}` : 'No folder';
+  $('#nav-tickets-sub').textContent = S.tickets.length ? `${S.tickets.length} tickets · Jira` : 'Not synced';
   $('#nav-repos-sub').textContent = S.settings.reposDir ? `${S.repos.length} repos · ${base(S.settings.reposDir)}` : 'No folder';
   $('#nav-dev-sub').textContent = S.dev.ticket ? `${S.dev.ticket.id || S.dev.ticket.title}${S.dev.repo ? ' → ' + S.dev.repo.name : ''}` : 'Nothing selected';
   keepFocus(() => {
@@ -64,38 +64,43 @@ function render() {
 }
 
 /* ---------- Tickets ---------- */
-async function pickTicketsDir() {
-  const dir = await api.pickFolder('Choose your tickets folder');
-  if (!dir) return;
-  S.settings = await api.setSettings({ ticketsDir: dir });
-  await loadTickets();
-}
+// Reads the tickets the last Jira sync saved.
 async function loadTickets() {
-  if (!S.settings.ticketsDir) return;
   S.ticketsLoading = true; render();
-  try { const r = await api.scanTickets(S.settings.ticketsDir); S.tickets = r.tickets; S.ticketsSkipped = r.skipped; }
-  catch (e) { alert(`Couldn't read the tickets folder: ${e.message}`); S.tickets = []; S.ticketsSkipped = []; }
+  try { const r = await api.scanTickets(); S.tickets = r.tickets; S.ticketsSkipped = r.skipped; }
+  catch (e) { alert(`Couldn't read the synced tickets: ${e.message}`); S.tickets = []; S.ticketsSkipped = []; }
   S.ticketsLoading = false; render();
+}
+
+// Read-only: pulls your tickets in the configured Jira filter or sprint, then rescans.
+async function syncJira() {
+  if (S.jiraSyncing) return;
+  S.jiraSyncing = true; render();
+  try {
+    const r = await api.syncJira();
+    S.jiraStatus = `${r.count} ticket(s) from "${r.filter}"${r.removed ? `, ${r.removed} no longer in the filter removed` : ''}`;
+  } catch (e) { alert(`Jira sync failed: ${e.message}`); }
+  S.jiraSyncing = false;
+  await loadTickets();
+  render();
 }
 
 function renderTickets() {
   const v = $('#view-tickets');
-  const dir = S.settings.ticketsDir;
   const q = S.ticketQuery.toLowerCase();
   const list = S.tickets.filter(t => !q || `${t.id} ${t.title} ${t.rel}`.toLowerCase().includes(q));
   const p = S.previewTicket && S.tickets.find(t => t.uid === S.previewTicket);
   v.innerHTML = `
     <div class="view-head">
       <div><h1>Tickets</h1>
-        ${dir ? `<div class="path">${esc(dir)}</div>` : '<p>Pick the folder where your Jira tickets live: Word (.doc, .docx), Markdown, text or Jira JSON exports.</p>'}
+        ${S.jiraStatus ? `<div class="sub">Jira: ${esc(S.jiraStatus)}</div>` : ''}
+        <p>Your tickets in the Jira sprint, read-only. Press Sync from Jira to refresh.</p>
       </div>
       <div class="row">
-        ${dir ? `<button class="btn" data-act="reload-tickets">${S.ticketsLoading ? 'Fetching…' : 'Fetch again'}</button>` : ''}
-        <button class="btn ${dir ? '' : 'primary'}" data-act="pick-tickets">${dir ? 'Change folder' : 'Choose folder'}</button>
+        <button class="btn primary" data-act="sync-jira" ${S.jiraSyncing ? 'disabled' : ''}>${S.jiraSyncing ? 'Syncing…' : 'Sync from Jira'}</button>
       </div>
     </div>
-    ${!dir ? `<div class="empty"><strong>No tickets folder yet</strong>Choose a folder and FANG fetches every ticket inside it: Word documents, Markdown, text, and Jira JSON exports with many issues.</div>` :
-      !S.tickets.length && !S.ticketsLoading ? `<div class="empty"><strong>No tickets found</strong>This folder has no .doc, .docx, .md, .txt or .json files. Add a ticket and press Fetch again.</div>` : `
+    ${!S.tickets.length && !S.ticketsLoading ? `<div class="empty"><strong>No tickets yet</strong>Press Sync from Jira to fetch the tickets assigned to you.</div>` : `
     <div class="split">
       <div>
         <input class="search" id="ticket-search" placeholder="Search by ID, title or file" value="${esc(S.ticketQuery)}">
@@ -607,8 +612,7 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if (!el || el.tagName === 'SELECT' || el.tagName === 'INPUT') return;
   const a = el.dataset.act;
-  if (a === 'pick-tickets') pickTicketsDir();
-  else if (a === 'reload-tickets') loadTickets();
+  if (a === 'sync-jira') syncJira();
   else if (a === 'preview-ticket') { S.previewTicket = el.dataset.uid; render(); }
   else if (a === 'develop-ticket') selectTicket(el.dataset.uid);
   else if (a === 'pick-repos') pickReposDir();
@@ -677,6 +681,5 @@ api.onJobEvent(onJobEvent);
   render();
   checkClaude();
   await Promise.all([loadTickets(), loadRepos()]);
-  if (!S.settings.ticketsDir) S.view = 'tickets';
   render();
 })();

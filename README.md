@@ -38,10 +38,7 @@ The builds are unsigned. On a Mac, right-click FANG and choose Open the first ti
 
 ## How it works
 
-**Tickets** — choose a folder and FANG fetches every ticket in it (up to two folders deep):
-- `.doc` / `.docx` (Word): one ticket per file. FANG extracts the text (body, headers and footnotes); images and formatting aren't included. Word's temporary `~$` lock files are ignored, and password-protected or damaged files are listed as "couldn't be read".
-- `.md` / `.txt`: one ticket per file. The ID (e.g. `PROJ-123`) is taken from the file name or content, the title from the first `#` heading.
-- `.json`: a Jira issue, an array of issues, or a Jira export with an `issues` list. Each issue becomes a ticket.
+**Tickets (Jira sync, read-only)** — copy `.env.example` to `.env` (project folder, or the app's data folder for the installed app) and fill in `JIRA_BASE_URL` (just the site, e.g. `https://your-site.atlassian.net`), `JIRA_EMAIL` and `JIRA_API_TOKEN`. **Sync from Jira** fetches the issues assigned to you in `JIRA_FILTER` (default "Ready for Sprint - Team John"): a saved filter by that name, otherwise the sprint by that name. They're saved as `<KEY>.json` in FANG's own data folder (`jira-sync/`), and that folder is the only place FANG reads tickets from. FANG only sends GET requests to Jira: it never creates, edits, transitions, comments on or deletes an issue. Issues that leave the sprint or are reassigned are removed from `jira-sync/` locally only.
 
 **Repositories** — choose a folder and FANG finds every git repository in it (up to two levels deep), showing its branch, uncommitted changes and whether `develop` exists.
 

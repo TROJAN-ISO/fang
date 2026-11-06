@@ -6,6 +6,7 @@ const scan = require('./lib/scan');
 const gitlib = require('./lib/git');
 const claude = require('./lib/claude');
 const prompts = require('./lib/prompts');
+const jira = require('./lib/jira');
 
 fixPath();
 
@@ -14,7 +15,7 @@ const jobs = new Map();
 let jobSeq = 0;
 
 const settingsFile = () => path.join(app.getPath('userData'), 'fang-settings.json');
-const DEFAULTS = { ticketsDir: '', reposDir: '', claudePath: '', extraAllow: [], maxTurns: 150 };
+const DEFAULTS = { reposDir: '', claudePath: '', extraAllow: [], maxTurns: 150 };
 
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; }
@@ -69,7 +70,13 @@ handle('claude:check', async () => {
   return { path: p, version: p ? await claude.version(p) : null };
 });
 
-handle('tickets:scan', async dir => scan.scanTickets(dir));
+// Tickets come only from the read-only Jira sync, kept in FANG's own data
+// folder (<userData>/jira-sync), so no other file can show up as a ticket.
+handle('tickets:scan', async () => scan.scanTickets(path.join(app.getPath('userData'), 'jira-sync')));
+handle('jira:sync', async () => {
+  const envFiles = [path.join(__dirname, '.env'), path.join(app.getPath('userData'), '.env')];
+  return jira.sync(envFiles, app.getPath('userData'));
+});
 handle('repos:scan', async dir => scan.scanRepos(dir));
 handle('repo:info', async repo => gitlib.info(repo));
 handle('repo:head', async repo => gitlib.head(repo));
