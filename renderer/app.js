@@ -294,6 +294,14 @@ function replan() {
   render();
 }
 
+// Start over with a clean slate; uncommitted changes stay on disk.
+function newTicket() {
+  ['parse', 'plan', 'impl'].forEach(cancelJob);
+  S.dev = freshDev();
+  S.view = 'tickets';
+  render();
+}
+
 async function createBranch() {
   const d = S.dev;
   d.branch.status = 'running'; d.branch.msg = ''; render();
@@ -599,7 +607,7 @@ function renderDev() {
     <div class="pager">
       <button class="btn" data-act="back" ${n === 1 ? 'disabled' : ''}>Back</button>
       <span class="pager-pos">Phase ${n} of 5 · ${PHASES[n - 1]}</span>
-      ${n < 5 ? `<button class="btn primary" data-act="next" ${nextOk ? '' : 'disabled'}>Next: ${PHASES[n]}</button>` : '<span></span>'}
+      ${n < 5 ? `<button class="btn primary" data-act="next" ${nextOk ? '' : 'disabled'}>Next: ${PHASES[n]}</button>` : `<button class="btn primary" data-act="new-ticket" ${d.impl.status === 'running' ? 'disabled' : ''}>Develop another ticket</button>`}
     </div>`;
   const log = v.querySelector('.log');
   if (log) log.scrollTop = log.scrollHeight;
@@ -631,6 +639,7 @@ document.addEventListener('click', e => {
   else if (a === 'continue-impl') continueImpl();
   else if (a === 'load-changes') loadChanges();
   else if (a === 'diff') showDiff(el.dataset.file);
+  else if (a === 'new-ticket') newTicket();
 });
 
 document.addEventListener('change', e => {
