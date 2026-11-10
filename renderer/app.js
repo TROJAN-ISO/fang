@@ -598,6 +598,7 @@ function renderDev() {
   }
   const { done, reachable } = phaseState();
   const n = d.page;
+  api.companionPhase(n - 1); // companion counts steps from 0
   const body = [phase1, phase2, phase3, phase4, phase5][n - 1]();
   const nextOk = n < 5 && reachable[n + 1] && (done[n] || n === 2 && !!d.repo);
   v.innerHTML = `
@@ -662,6 +663,7 @@ $('#open-settings').addEventListener('click', () => {
   $('#set-claude').value = S.settings.claudePath || '';
   $('#set-extra').value = (S.settings.extraAllow || []).join('\n');
   $('#set-turns').value = S.settings.maxTurns || 150;
+  $('#set-whisper').value = S.settings.whisperModel || '';
   $('#settings-dialog').showModal();
 });
 $('#settings-dialog').addEventListener('close', async () => {
@@ -670,6 +672,7 @@ $('#settings-dialog').addEventListener('close', async () => {
     claudePath: $('#set-claude').value.trim(),
     extraAllow: $('#set-extra').value.split('\n').map(s => s.trim()).filter(Boolean),
     maxTurns: Math.max(20, Math.min(500, parseInt($('#set-turns').value, 10) || 150)),
+    whisperModel: $('#set-whisper').value.trim(),
   });
   checkClaude();
 });
@@ -682,6 +685,123 @@ async function checkClaude() {
     else { el.textContent = 'Claude Code not found. Install it or set its path in Settings.'; el.classList.add('bad'); }
   } catch (e) { el.textContent = e.message; el.classList.add('bad'); }
 }
+
+/* ---------- Voice ---------- */
+// Hold Option/Alt+Space (or press the mic button) and speak; whisper.cpp transcribes locally.
+// A focused text field gets the words as dictation; otherwise they run as a command.
+const V = { rec: null, want: false };
+const NUM = { one: 1, two: 2, three: 3, four: 4, five: 5 };
+const VOICE_ACTS = {
+  next: 'next', back: 'back', 'go back': 'back', 'sync jira': 'sync-jira',
+  'create branch': 'create-branch', implement: 'implement', 'start implementation': 'implement',
+  replan: 'replan', 're plan': 'replan', cancel: 'cancel', stop: 'cancel',
+  refresh: 'load-changes', 'refresh changes': 'load-changes', 'send answer': 'continue-impl', continue: 'continue-impl',
+  'develop another ticket': 'new-ticket', 'another ticket': 'new-ticket', 'new ticket': 'new-ticket', 'next ticket': 'new-ticket',
+};
+const VOICE_VIEWS = { tickets: 'tickets', repositories: 'repos', repos: 'repos', development: 'dev' };
+
+// mood is for the companion: thinking (listening/transcribing), happy (handled), idle, error.
+function voiceStatus(text, mood = 'idle') {
+  const el = $('#voice-status');
+  el.textContent = text;
+  el.classList.toggle('bad', mood === 'error');
+  $('#voice-btn').classList.toggle('live', V.want);
+  api.companionVoice(mood, text);
+}
+
+async function voiceStart() {
+  if (V.want) return;
+  V.want = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    const ctx = new AudioContext({ sampleRate: 16000 }); // whisper.cpp wants 16 kHz mono
+    const node = ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but tiny; move to AudioWorklet if Chromium drops it
+    const chunks = [];
+    node.onaudioprocess = e => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    ctx.createMediaStreamSource(stream).connect(node);
+    node.connect(ctx.destination);
+    V.rec = { stream, ctx, chunks };
+    voiceStatus('Listening…', 'thinking');
+    if (!V.want) voiceStop(); // key released while the mic was opening
+  } catch (e) { V.want = false; voiceStatus(`Microphone: ${e.message}`, 'error'); }
+}
+
+async function voiceStop() {
+  V.want = false;
+  const r = V.rec;
+  if (!r) return;
+  V.rec = null;
+  r.stream.getTracks().forEach(t => t.stop());
+  await r.ctx.close();
+  const len = r.chunks.reduce((n, c) => n + c.length, 0);
+  if (len < 16000 * 0.3) { voiceStatus('Too short. Hold the key while you speak.'); return; }
+  voiceStatus('Transcribing…', 'thinking');
+  try {
+    const text = (await api.transcribe(wav(r.chunks, len))).replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text) { voiceStatus('Heard nothing.'); return; }
+    const miss = voiceRun(text);
+    voiceStatus(`"${text}"${miss}`, miss ? 'idle' : 'happy');
+  } catch (e) { voiceStatus(e.message, 'error'); }
+}
+
+function wav(chunks, len) {
+  const b = new DataView(new ArrayBuffer(44 + len * 2));
+  const str = (o, s) => [...s].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); b.setUint32(4, 36 + len * 2, true); str(8, 'WAVEfmt ');
+  b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, 16000, true); b.setUint32(28, 32000, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true);
+  str(36, 'data'); b.setUint32(40, len * 2, true);
+  let o = 44;
+  for (const c of chunks) for (const s of c) { b.setInt16(o, Math.max(-1, Math.min(1, s)) * 0x7fff, true); o += 2; }
+  return new Uint8Array(b.buffer);
+}
+
+// Returns '' when handled, or a short reason shown after the transcript.
+function voiceRun(text) {
+  const f = document.activeElement;
+  if (f && (f.tagName === 'TEXTAREA' || f.tagName === 'INPUT' && /^(text|search)$/.test(f.type))) {
+    const pad = f.selectionStart > 0 && !/\s$/.test(f.value.slice(0, f.selectionStart)) ? ' ' : '';
+    f.setRangeText(pad + text, f.selectionStart, f.selectionEnd, 'end');
+    f.dispatchEvent(new Event('input', { bubbles: true }));
+    return '';
+  }
+  const said = text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const flat = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  let m;
+  if ((m = said.match(/^(?:develop|open|work on|start) ticket (.+)$/))) {
+    const q = flat(m[1]);
+    const t = S.tickets.find(x => flat(x.id) === q) || S.tickets.find(x => flat(x.title).includes(q));
+    if (!t) return ' · no matching ticket';
+    selectTicket(t.uid); return '';
+  }
+  if ((m = said.match(/^(?:use |open |select )?(?:repo|repository) (.+)$/))) {
+    const q = flat(m[1]);
+    const r = S.repos.find(x => flat(x.name) === q) || S.repos.find(x => flat(x.name).includes(q));
+    if (!r) return ' · no matching repository';
+    selectRepo(r.path); return '';
+  }
+  if ((m = said.match(/^(?:go to )?(?:phase|step) (\w+)$/))) {
+    if (S.view !== 'dev') { S.view = 'dev'; render(); }
+    goTo(NUM[m[1]] || Number(m[1])); return '';
+  }
+  const view = VOICE_VIEWS[said.replace(/^(?:go to|show|open) /, '')];
+  if (view) { S.view = view; render(); return ''; }
+  const act = VOICE_ACTS[said];
+  if (!act) return ' · not a command';
+  const btn = document.querySelector(`.view.active [data-act="${act}"]:not([disabled])`);
+  if (!btn) return ' · not available here';
+  btn.click(); return '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || !e.altKey) return;
+  e.preventDefault(); // no non-breaking space typed
+  if (!e.repeat) voiceStart();
+});
+document.addEventListener('keyup', e => { if (e.code === 'Space' && V.want) { e.preventDefault(); voiceStop(); } });
+window.addEventListener('blur', () => { if (V.want) voiceStop(); });
+$('#voice-btn').addEventListener('mousedown', e => e.preventDefault()); // keep focus in the field being dictated into
+$('#voice-btn').addEventListener('click', () => (V.want ? voiceStop() : voiceStart()));
 
 /* ---------- Boot ---------- */
 api.onJobEvent(onJobEvent);

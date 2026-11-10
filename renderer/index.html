@@ -30,6 +30,8 @@
           <strong>Never commits. Never pushes.</strong>
           Every change stays on disk for you to review.
         </div>
+        <button class="btn ghost voice-btn" id="voice-btn" title="Hold Option+Space (Alt+Space) to talk">Hold ⌥ Space to talk</button>
+        <div class="claude-status" id="voice-status"></div>
         <div class="claude-status" id="claude-status">Checking Claude Code…</div>
         <button class="link-btn" id="open-settings">Settings</button>
       </div>
@@ -51,6 +53,10 @@
       <label>Extra commands Raphael may run
         <textarea id="set-extra" rows="5" placeholder="One per line, e.g.&#10;php artisan migrate:fresh --env=testing&#10;npm run build"></textarea>
         <small>Tests, linters and type checks are already allowed. Commits, pushes and dependency installs are always blocked, even if listed here.</small>
+      </label>
+      <label>Whisper model file (voice)
+        <input id="set-whisper" placeholder="Leave empty for FANG's data folder/models/ggml-base.en.bin">
+        <small>Voice needs <code>brew install whisper-cpp</code> and a ggml model from huggingface.co/ggerganov/whisper.cpp.</small>
       </label>
       <label>Max turns per run
         <input id="set-turns" type="number" min="20" max="500">

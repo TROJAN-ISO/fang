@@ -1,0 +1,120 @@
+:root {
+  --body: #3a3570;
+  --body-edge: #2a2656;
+  --ear-in: #5c56a3;
+  --screen: #15132b;
+  --fang: #f6f3ff;
+  --glow: #6fe6d6;
+
+  --bubble-bg: #ffffff;
+  --bubble-ink: #1f1d36;
+  --bubble-edge: #d9d6ee;
+  --track: rgba(58, 53, 112, 0.22);
+  --label: #3a3570;
+
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bubble-bg: #24213f;
+    --bubble-ink: #ecebfa;
+    --bubble-edge: #3d3968;
+    --track: rgba(236, 235, 250, 0.16);
+    --label: #c9c6ec;
+  }
+}
+
+/* Mood colours: the screen glow is how you read her at a glance. */
+body[data-mood="thinking"] { --glow: #8db6ff; }
+body[data-mood="working"]  { --glow: #ffc95a; }
+body[data-mood="success"],
+body[data-mood="happy"]    { --glow: #7fe38f; }
+body[data-mood="error"]    { --glow: #ff5f75; }
+body[data-mood="worried"]  { --glow: #ffa36b; }
+body[data-mood="blocked"]  { --glow: #c7a0ff; }
+body[data-mood="sleep"]    { --glow: #6c6a92; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  font: 12.5px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+#stage {
+  width: 240px; height: 360px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  padding-bottom: 6px;
+  transform-origin: 0 0;
+}
+
+/* ---------- speech bubble ---------- */
+#bubble {
+  position: relative;
+  max-width: 220px;
+  margin-bottom: 8px;
+  padding: 8px 11px;
+  background: var(--bubble-bg);
+  color: var(--bubble-ink);
+  border: 1px solid var(--bubble-edge);
+  border-left: 3px solid var(--glow);
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(20, 16, 60, 0.18);
+  cursor: default;
+  animation: pop 160ms ease-out;
+}
+#bubble[hidden] { display: none; }
+#bubble::after {
+  content: "";
+  position: absolute; left: 50%; bottom: -7px;
+  width: 12px; height: 12px;
+  background: var(--bubble-bg);
+  border-right: 1px solid var(--bubble-edge);
+  border-bottom: 1px solid var(--bubble-edge);
+  transform: translateX(-50%) rotate(45deg);
+}
+@keyframes pop { from { opacity: 0; transform: translateY(4px) scale(0.97); } }
+
+/* ---------- character: Capri sprite sheets, stepped by renderer.js ---------- */
+#buddy {
+  width: 120px; height: 192px; /* 240x384 cells at half size */
+  margin-bottom: -14px; /* feet rest on the perch */
+  position: relative; z-index: 2;
+  cursor: grab;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--glow) 55%, transparent));
+  transition: filter 300ms;
+}
+body.held #buddy { cursor: grabbing; }
+
+/* ---------- perch: the mini phase stepper she sits on ---------- */
+#perch {
+  width: 176px;
+  padding: 18px 10px 6px;
+  border-radius: 14px;
+  background: var(--bubble-bg);
+  border: 1px solid var(--bubble-edge);
+  box-shadow: 0 4px 14px rgba(20, 16, 60, 0.14);
+}
+#steps { display: flex; gap: 5px; list-style: none; }
+#steps li {
+  flex: 1; height: 6px; border-radius: 3px;
+  background: var(--track);
+  transition: background 300ms;
+}
+#steps li.done { background: var(--body); }
+@media (prefers-color-scheme: dark) { #steps li.done { background: var(--ear-in); } }
+#steps li.now { background: var(--glow); }
+#step-label {
+  margin-top: 5px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--label);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

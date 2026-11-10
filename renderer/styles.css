@@ -191,3 +191,5 @@ dialog::backdrop { background: rgba(10, 14, 22, .5); }
 .skipped { margin: 0 0 10px; }
 .skipped summary { color: var(--warn); }
 #view-dev .view-head { max-width: 1000px; margin: 0 auto 18px; }
+
+.voice-btn.live { background: var(--danger-soft); color: var(--danger); }
