@@ -89,6 +89,8 @@ html, body {
   transition: filter 300ms;
 }
 body.held #buddy { cursor: grabbing; }
+/* Mirrored while wandering to the left. */
+#buddy.face-left { scale: -1 1; }
 
 /* ---------- perch: the mini phase stepper she sits on ---------- */
 #perch {

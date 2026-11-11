@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('fang', {
   fileDiff: (repo, file, untracked) => call('repo:fileDiff', repo, file, untracked),
   reveal: p => call('shell:reveal', p),
   companionPhase: n => ipcRenderer.send('companion:phase', n),
+  companionTab: v => ipcRenderer.send('companion:tab', v),
   companionVoice: (mood, text) => ipcRenderer.send('companion:voice', mood, text),
   transcribe: wav => call('voice:transcribe', wav),
   startJob: (kind, payload) => call('job:start', kind, payload),

@@ -140,5 +140,6 @@ handle('job:start', async (kind, payload) => {
 });
 
 ipcMain.on('companion:phase', (_e, n) => companion.setPhase(n));
+ipcMain.on('companion:tab', (_e, v) => companion.setTab(String(v)));
 ipcMain.on('companion:voice', (_e, mood, text) => companion.voice(mood, text));
 handle('job:cancel', async id => { const j = jobs.get(id); if (j) j.cancel(); return true; });

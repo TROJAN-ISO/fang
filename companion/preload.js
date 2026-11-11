@@ -7,8 +7,9 @@ contextBridge.exposeInMainWorld('companion', {
   dragEnd: () => ipcRenderer.send('companion:dragEnd'),
   click: () => ipcRenderer.send('companion:click'),
   menu: () => ipcRenderer.send('companion:menu'),
+  canWalk: ok => ipcRenderer.send('companion:canWalk', !!ok),
   on: (name, cb) => {
-    if (!['state', 'phase', 'config'].includes(name)) return;
+    if (!['state', 'phase', 'config', 'walk'].includes(name)) return;
     ipcRenderer.on(`companion:${name}`, (_e, data) => cb(data));
   },
 });

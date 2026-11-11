@@ -61,7 +61,9 @@ function keepFocus(fn) {
   }
 }
 
+let lastTab = '';
 function render() {
+  if (S.view !== lastTab) { lastTab = S.view; api.companionTab(S.view); } // Fang wanders at this tab's pace
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === S.view));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${S.view}`));
   $('#nav-tickets-sub').textContent = S.tickets.length ? `${S.tickets.length} tickets · Jira` : 'Not synced';

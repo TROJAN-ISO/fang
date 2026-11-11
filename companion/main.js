@@ -21,6 +21,11 @@ let cfgFile = null;
 let drag = null;
 let lastLogAt = 0;
 let phase = 0;
+let tab = 'tickets';
+let hovering = false;
+let canWalk = true;
+let walk = null;
+let wanderTimer = null;
 
 // ---------- settings ----------
 function loadCfg() {
@@ -88,6 +93,7 @@ function create(mainWindow) {
     send('phase', phase);
     if (!cfg.hidden) win.showInactive();
     say('hello', greeting());
+    scheduleWander();
   });
 
   if (mainWin) mainWin.on('closed', destroy);
@@ -95,6 +101,8 @@ function create(mainWindow) {
 }
 
 function destroy() {
+  stopWalk();
+  clearTimeout(wanderTimer);
   stopDrag();
   if (win && !win.isDestroyed()) win.destroy();
   win = null;
@@ -149,6 +157,7 @@ function registerKeys() {
 // ---------- dragging (main process follows the cursor; works the same on Mac and Windows) ----------
 function startDrag() {
   if (!win) return;
+  stopWalk();
   const c = screen.getCursorScreenPoint();
   const [wx, wy] = win.getPosition();
   drag = { dx: c.x - wx, dy: c.y - wy, timer: setInterval(() => {
@@ -176,12 +185,78 @@ function stopDrag() {
   saveCfg();
 }
 
+// ---------- wandering: while FANG is focused she strolls along the bottom of the screen under its window ----------
+// Per tab: [min pause, max pause, speed in px/s]. Calm while browsing, busier during Development and Reviews.
+const PACE = { tickets: [20000, 40000, 60], repos: [20000, 40000, 60], dev: [8000, 16000, 110], reviews: [8000, 16000, 110] };
+
+function scheduleWander(delay) {
+  clearTimeout(wanderTimer);
+  const [min, max] = PACE[tab];
+  wanderTimer = setTimeout(wander, delay ?? min + Math.random() * (max - min));
+}
+
+// A stroll of 120-400 px; the next pause starts when she stops.
+function wander() {
+  if (!win || win.isDestroyed() || walk) return;
+  if (!win.isVisible() || drag || hovering || !canWalk || !mainWin || mainWin.isDestroyed()
+    || !(mainWin.isFocused() || win.isFocused())) return scheduleWander(); // FANG or Fang herself
+  const m = mainWin.getBounds();
+  const b = win.getBounds();
+  const a = screen.getDisplayMatching(m).workArea;
+  const lo = Math.max(a.x, m.x - b.width / 2);
+  const hi = Math.min(a.x + a.width - b.width, m.x + m.width - b.width / 2);
+  if (hi <= lo) return scheduleWander();
+  const step = (120 + Math.random() * 280) * (Math.random() < 0.5 ? -1 : 1);
+  let x = Math.min(hi, Math.max(lo, b.x + step));
+  if (Math.abs(x - b.x) < 60) x = Math.min(hi, Math.max(lo, b.x - step)); // at an edge: turn around
+  if (!walkTo(Math.round(x), a.y + a.height - b.height)) scheduleWander();
+}
+
+function walkTo(x, y) {
+  const [sx, sy] = win.getPosition();
+  const dist = Math.hypot(x - sx, y - sy);
+  if (dist < 20) return false;
+  const t0 = Date.now();
+  const ms = (dist / PACE[tab][2]) * 1000;
+  send('walk', x < sx ? -1 : 1);
+  walk = setInterval(() => {
+    if (!win || win.isDestroyed()) return stopWalk();
+    const k = Math.min(1, (Date.now() - t0) / ms);
+    win.setPosition(Math.round(sx + (x - sx) * k), Math.round(sy + (y - sy) * k));
+    if (k === 1) stopWalk();
+  }, 16);
+  return true;
+}
+
+function stopWalk() {
+  if (!walk) return;
+  clearInterval(walk);
+  walk = null;
+  send('walk', 0);
+  scheduleWander();
+}
+
+// FANG's renderer reports the focused tab; she sets off shortly after a switch.
+function setTab(name) {
+  if (!PACE[name] || name === tab) return;
+  tab = name;
+  scheduleWander(800);
+}
+
 // ---------- IPC from the companion window only ----------
 const fromCompanion = e => win && !win.isDestroyed() && e.sender === win.webContents;
 
 ipcMain.on('companion:hover', (e, over) => {
-  if (!fromCompanion(e) || drag) return;
+  if (!fromCompanion(e)) return;
+  hovering = !!over;
+  if (hovering) stopWalk(); // hold still so she can be clicked
+  if (drag) return;
   win.setIgnoreMouseEvents(!over, { forward: true });
+});
+ipcMain.on('companion:canWalk', (e, ok) => {
+  if (!fromCompanion(e)) return;
+  canWalk = !!ok;
+  if (!canWalk) stopWalk();
 });
 ipcMain.on('companion:dragStart', e => { if (fromCompanion(e)) startDrag(); });
 ipcMain.on('companion:dragEnd', e => { if (fromCompanion(e)) stopDrag(); });
@@ -280,4 +355,4 @@ function voice(mood, text) {
   say(mood, String(text || '').slice(0, 160), { force: true });
 }
 
-module.exports = { create, destroy, jobEvent, setPhase, toggleHidden, voice };
+module.exports = { create, destroy, jobEvent, setPhase, setTab, toggleHidden, voice };

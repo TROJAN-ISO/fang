@@ -12,6 +12,7 @@
   const BUSY = new Set(['thinking', 'working', 'worried']);
   const STICKY = new Set(['error', 'blocked']);
   const SLEEP_AFTER = 10 * 60 * 1000;
+  const NO_WALK = new Set(['sleep', 'error', 'blocked']);
 
   // Capri sprite clips: [frames, fps, columns]. Sizes from Capri's clips.json (240x384 cells).
   const CLIPS = {
@@ -68,6 +69,7 @@
     mood = next;
     playMood(next, prev);
     body.dataset.mood = next;
+    api.canWalk(!still && !NO_WALK.has(next));
     lastActivity = Date.now();
     // Short-lived moods settle back to idle on their own.
     if (next === 'hello') moodTimer = setTimeout(() => setMood('idle'), 1200);
@@ -98,6 +100,12 @@
   });
 
   api.on('phase', n => renderSteps(n));
+
+  // The main process moves the window; here she dances along, facing where she's going.
+  api.on('walk', dir => {
+    if (dir) { buddy.classList.toggle('face-left', dir < 0); if (clipName !== 'dance') play('dance'); }
+    else playMood(mood);
+  });
 
   // ---------- perch stepper ----------
   function renderSteps(current) {
@@ -211,4 +219,5 @@
 
   renderSteps(0);
   playMood('idle');
+  api.canWalk(!still);
 })();
