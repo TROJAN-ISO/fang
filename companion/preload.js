@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('companion', {
   menu: () => ipcRenderer.send('companion:menu'),
   canWalk: ok => ipcRenderer.send('companion:canWalk', !!ok),
   on: (name, cb) => {
-    if (!['state', 'phase', 'config', 'walk'].includes(name)) return;
+    if (!['state', 'phase', 'config', 'walk', 'active'].includes(name)) return;
     ipcRenderer.on(`companion:${name}`, (_e, data) => cb(data));
   },
 });

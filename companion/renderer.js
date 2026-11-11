@@ -11,7 +11,7 @@
 
   const BUSY = new Set(['thinking', 'working', 'worried']);
   const STICKY = new Set(['error', 'blocked']);
-  const SLEEP_AFTER = 10 * 60 * 1000;
+  const SLEEP_AFTER = 5 * 60 * 1000;
   const NO_WALK = new Set(['sleep', 'error', 'blocked']);
 
   // Capri sprite clips: [frames, fps, columns]. Sizes from Capri's clips.json (240x384 cells).
@@ -61,6 +61,7 @@
   let bubbleTimer = null;
   let moodTimer = null;
   let lastActivity = Date.now();
+  let autoNap = false; // napped on her own, so FANG input may wake her
 
   // ---------- mood and speech ----------
   function setMood(next) {
@@ -71,6 +72,7 @@
     body.dataset.mood = next;
     api.canWalk(!still && !NO_WALK.has(next));
     lastActivity = Date.now();
+    autoNap = false;
     // Short-lived moods settle back to idle on their own.
     if (next === 'hello') moodTimer = setTimeout(() => setMood('idle'), 1200);
     if (next === 'success' || next === 'happy') moodTimer = setTimeout(() => setMood('idle'), 8000);
@@ -127,9 +129,16 @@
     }, 2500 + Math.random() * 3500);
   })();
 
+  // Naps after SLEEP_AFTER with no job events and no input in FANG's window.
+  // Input wakes her only from her own nap, not from one you picked in the menu.
   setInterval(() => {
-    if (mood === 'idle' && Date.now() - lastActivity > SLEEP_AFTER) { setMood('sleep'); hideBubble(); }
+    if (mood === 'idle' && Date.now() - lastActivity > SLEEP_AFTER) { setMood('sleep'); hideBubble(); autoNap = true; }
   }, 30000);
+
+  api.on('active', () => {
+    lastActivity = Date.now();
+    if (mood === 'sleep' && autoNap) setMood('idle');
+  });
 
   // ---------- mouse: only the character, bubble and perch catch clicks ----------
   let hovering = false;

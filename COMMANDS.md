@@ -70,7 +70,7 @@ If you say something that isn't a command, Fang shows what she heard plus "not a
 
 The two shortcuts work in every app while FANG is open. On a Mac, Cmd+Option+H normally means "Hide Others", and FANG takes it over while it's running.
 
-She naps after 10 minutes with nothing happening. Any activity wakes her.
+She naps after 5 minutes with no jobs running and no mouse or keyboard use in FANG's window. Using FANG again, a job event or clicking her wakes her. If you put her to sleep with **Nap**, only a job event or a click wakes her.
 
 ### What her moods mean
 

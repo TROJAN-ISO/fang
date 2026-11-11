@@ -68,6 +68,13 @@ function say(mood, text, opts = {}) {
 function create(mainWindow) {
   mainWin = mainWindow;
   loadCfg();
+  // Mouse or keys in FANG's window keep her awake (reported at most every 5s).
+  let lastInput = 0;
+  mainWin.webContents.on('input-event', () => {
+    if (Date.now() - lastInput < 5000) return;
+    lastInput = Date.now();
+    send('active');
+  });
   const { w, h, s } = dims();
   const { x, y } = startPos(w, h);
 
