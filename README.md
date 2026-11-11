@@ -15,7 +15,8 @@ FANG drives your own Claude Code setup:
 - Git on your PATH
 - Internet access for `npm install` the first time (it downloads Electron and `word-extractor`, the library that reads Word files)
 - Claude Code installed and logged in (run `claude` once in a terminal to confirm)
-- Installed in `~/.claude/`: the `jira-to-code` skill, the `raphael` agent, and the caveman and ponytail plugins
+- Installed in `~/.claude/`: the `jira-to-code` skill, the `raphael` and `veronica` agents, and the caveman and ponytail plugins
+- For Reviews: `GITHUB_TOKEN` in `.env`, a classic personal access token with the `repo` scope
 
 ## Run it
 
@@ -50,7 +51,17 @@ The builds are unsigned. On a Mac, right-click FANG and choose Open the first ti
 4. **Review the brief and implement.** You see the plan brief, the codebase brief (jira-to-code's codebase summary) and the full plan. Pressing **Implement** is your plan approval (Checkpoint 3); Raphael then writes the code and tests. If Raphael gets blocked, answer him in FANG and he continues in the same session.
 5. **File changes.** Every changed file with +/− counts and a diff, Raphael's implementation summary and PR description, and a safety check showing no commits were made and nothing was pushed.
 
+**Reviews** — pull requests where your review is requested, in four phases:
+
+1. **Pull request.** Open PRs from GitHub's `review-requested:@me` search, plus review requests from your notifications of the last day (search can lag a few minutes behind a new request). A PR leaves the list once you post your review.
+2. **Repository.** FANG picks the local repository whose `origin` matches the PR (or you pick one). It fetches the PR into `refs/fang/pr-N` and checks it out as a separate, detached worktree in FANG's data folder (`review-worktrees/`). Your own checkout, branch and changes are not touched.
+3. **Veronica review.** Veronica reviews read-only in that worktree. A second run then checks every finding against the code and drops anything it can't confirm, so you only see verified issues. You get what to fix (or none) and a verdict: Approved, or Not approved if any blocker or major issue is confirmed.
+4. **Submit.** You see exactly what will be posted and can edit the summary. Approved posts an `APPROVE` review. Not approved posts a `COMMENT` review (it doesn't block merging) with a comment on each file and line; issues on lines outside the diff go in the summary. FANG refuses to post if the PR got new commits after the review.
+
 ## Safety
+
+**GitHub writes:** the Reviews flow posts one thing, a pull request review, and only after you confirm it. FANG's GitHub code refuses every other write (no merging, closing, pushing or editing PRs). Claude itself still can't run `gh`.
+
 
 FANG blocks commits and pushes at three levels:
 

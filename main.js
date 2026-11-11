@@ -9,6 +9,7 @@ const gitlib = require('./lib/git');
 const claude = require('./lib/claude');
 const prompts = require('./lib/prompts');
 const jira = require('./lib/jira');
+const github = require('./lib/github');
 const companion = require('./companion/main');
 
 fixPath();
@@ -77,10 +78,12 @@ handle('claude:check', async () => {
 // Tickets come only from the read-only Jira sync, kept in FANG's own data
 // folder (<userData>/jira-sync), so no other file can show up as a ticket.
 handle('tickets:scan', async () => scan.scanTickets(path.join(app.getPath('userData'), 'jira-sync')));
-handle('jira:sync', async () => {
-  const envFiles = [path.join(__dirname, '.env'), path.join(app.getPath('userData'), '.env')];
-  return jira.sync(envFiles, app.getPath('userData'));
-});
+const envFiles = () => [path.join(__dirname, '.env'), path.join(app.getPath('userData'), '.env')];
+handle('jira:sync', async () => jira.sync(envFiles(), app.getPath('userData')));
+// Reviews: GitHub reads, plus posting a review only when the user confirms it.
+handle('github:requests', async () => github.reviewRequests(envFiles()));
+handle('review:prepare', async opts => github.prepare(envFiles(), app.getPath('userData'), opts));
+handle('review:post', async opts => github.postReview(envFiles(), opts));
 handle('repos:scan', async dir => scan.scanRepos(dir));
 handle('repo:info', async repo => gitlib.info(repo));
 handle('repo:head', async repo => gitlib.head(repo));
@@ -101,7 +104,7 @@ handle('voice:transcribe', async wav => {
 });
 handle('shell:reveal', async p => { shell.showItemInFolder(p); return true; });
 
-// kind: parse | plan | implement | continue
+// kind: parse | plan | implement | continue | review-find | review-verify
 handle('job:start', async (kind, payload) => {
   const s = loadSettings();
   const claudePath = findClaude(s.claudePath);
@@ -115,6 +118,11 @@ handle('job:start', async (kind, payload) => {
     opts = { ...base, profile: 'plan', cwd: payload.repo, prompt: prompts.plan(payload) };
   } else if (kind === 'implement') {
     opts = { ...base, profile: 'implement', agent: 'raphael', cwd: payload.repo, prompt: prompts.implement(payload) };
+  } else if (kind === 'review-find' || kind === 'review-verify') {
+    const trees = path.join(app.getPath('userData'), 'review-worktrees') + path.sep;
+    if (!path.resolve(String(payload.pr.worktree)).startsWith(trees)) throw new Error('Review checkout is outside FANG\'s data folder.');
+    const prompt = kind === 'review-find' ? prompts.reviewFind(payload.pr) : prompts.reviewVerify(payload.pr, payload.findings);
+    opts = { ...base, profile: 'review', agent: 'veronica', cwd: payload.pr.worktree, prompt };
   } else if (kind === 'continue') {
     opts = { ...base, profile: 'implement', agent: 'raphael', cwd: payload.repo, resume: payload.sessionId, prompt: prompts.continueImplement(payload) };
   } else {

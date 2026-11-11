@@ -190,6 +190,13 @@ dialog::backdrop { background: rgba(10, 14, 22, .5); }
 .settings-form small { font-weight: 400; color: var(--muted); }
 .skipped { margin: 0 0 10px; }
 .skipped summary { color: var(--warn); }
-#view-dev .view-head { max-width: 1000px; margin: 0 auto 18px; }
+#view-dev .view-head, #view-reviews .view-head { max-width: 1000px; margin: 0 auto 18px; }
+
+/* Reviews */
+.phase-card h3 { margin: 16px 0 6px; font-size: 13px; color: var(--muted); }
+.finding { border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; padding: 10px 12px; margin-top: 8px; font-size: 13px; }
+.finding.blocker, .finding.major { border-left-color: var(--danger); }
+.finding p { margin: 6px 0 0; }
+.finding pre { margin: 6px 0 0; }
 
 .voice-btn.live { background: var(--danger-soft); color: var(--danger); }

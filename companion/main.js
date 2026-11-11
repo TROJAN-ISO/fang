@@ -212,9 +212,11 @@ const START = {
   plan: ['thinking', 'Planning it with jira-to-code…', 3],
   implement: ['working', 'Raphael is on it. I\'ll shout when it\'s done.', 3],
   continue: ['working', 'Raphael is picking it back up.', 3],
+  'review-find': ['thinking', 'Veronica is reviewing the pull request…'],
+  'review-verify': ['thinking', 'Double-checking every finding against the code…'],
 };
 
-// kind: parse | plan | implement | continue    type: start | log | done
+// kind: parse | plan | implement | continue | review-find | review-verify    type: start | log | done
 function jobEvent(kind, type, data = {}) {
   if (!win || win.isDestroyed()) return;
 
@@ -254,6 +256,8 @@ function jobEvent(kind, type, data = {}) {
     }
     if (kind === 'parse') say('success', 'Ticket read. Check the parse, then pick a repo.');
     else if (kind === 'plan') say('success', 'The brief is ready for your review.');
+    else if (kind === 'review-find') say('success', /"findings"\s*:\s*\[\s*\]/.test(text) ? 'Veronica found nothing to fix. The verdict is in Reviews.' : 'Veronica found something. Verifying it now.');
+    else if (kind === 'review-verify') { say('success', 'Findings verified. The verdict is ready in Reviews.', { hold: true }); nudge(); }
     else {
       setPhase(4);
       say('success', 'Done. The changes are on disk for you to review and commit yourself.', { hold: true });

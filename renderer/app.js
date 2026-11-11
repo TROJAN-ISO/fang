@@ -7,7 +7,18 @@ const S = {
   tickets: [], ticketsSkipped: [], ticketsLoading: false, ticketQuery: '', previewTicket: null,
   repos: [], reposLoading: false, previewRepo: null,
   dev: freshDev(),
+  reviewPRs: [], reviewLoading: false, reviewErr: '',
+  rev: freshRev(),
 };
+
+function freshRev() {
+  return {
+    pr: null, repo: null, page: 1, body: null,
+    prep: { status: 'idle', msg: '', data: null },
+    find: idle(), verify: idle(),
+    post: { status: 'idle', msg: '', url: '' },
+  };
+}
 
 function freshDev() {
   return {
@@ -55,11 +66,13 @@ function render() {
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${S.view}`));
   $('#nav-tickets-sub').textContent = S.tickets.length ? `${S.tickets.length} tickets · Jira` : 'Not synced';
   $('#nav-repos-sub').textContent = S.settings.reposDir ? `${S.repos.length} repos · ${base(S.settings.reposDir)}` : 'No folder';
+  $('#nav-reviews-sub').textContent = S.reviewPRs.length ? `${S.reviewPRs.length} waiting on you` : S.reviewErr ? 'GitHub error' : 'None waiting';
   $('#nav-dev-sub').textContent = S.dev.ticket ? `${S.dev.ticket.id || S.dev.ticket.title}${S.dev.repo ? ' → ' + S.dev.repo.name : ''}` : 'Nothing selected';
   keepFocus(() => {
     if (S.view === 'tickets') renderTickets();
     if (S.view === 'repos') renderRepos();
     if (S.view === 'dev') renderDev();
+    if (S.view === 'reviews') renderReviews();
   });
 }
 
@@ -179,11 +192,12 @@ function renderRepos() {
 }
 
 /* ---------- Jobs ---------- */
-const jobKey = {};       // jobId -> dev key
+const jobKey = {};       // jobId -> job key (dev: parse/plan/impl, reviews: find/verify)
+const slot = key => S.dev[key] || S.rev[key];
 const pendingEvents = {}; // events that arrive before startJob resolves
 
 async function startJob(key, kind, payload) {
-  const st = S.dev[key];
+  const st = slot(key);
   Object.assign(st, { status: 'running', text: '', log: [], error: '', cost: null });
   render();
   try {
@@ -197,13 +211,13 @@ async function startJob(key, kind, payload) {
   }
 }
 function cancelJob(key) {
-  const st = S.dev[key];
+  const st = slot(key);
   if (st.jobId && st.status === 'running') api.cancelJob(st.jobId);
 }
 function onJobEvent(ev) {
   const key = jobKey[ev.id];
   if (!key) { (pendingEvents[ev.id] = pendingEvents[ev.id] || []).push(ev); return; }
-  const st = S.dev[key];
+  const st = slot(key);
   if (st.jobId !== ev.id) return; // stale job
   if (ev.type === 'log') {
     st.log.push(ev.entry);
@@ -227,6 +241,7 @@ function onJobEvent(ev) {
 async function afterJob(key) {
   const d = S.dev;
   if (key === 'parse') maybePlan();
+  if (key === 'find') maybeVerify();
   if (key === 'impl') {
     if (d.impl.status === 'done' && /RAPHAEL BLOCKED/.test(d.impl.text)) d.impl.status = 'blocked';
     await safetyCheck();
@@ -422,15 +437,13 @@ function goTo(n) {
   if (n >= 1 && n <= 5 && reachable[n]) { S.dev.page = n; render(); }
 }
 
-function stepper() {
-  const { done, reachable, busy } = phaseState();
-  const page = S.dev.page;
-  return `<ol class="stepper">${PHASES.map((name, i) => {
+function stepper(names = PHASES, page = S.dev.page, { done, reachable, busy } = phaseState(), act = 'goto') {
+  return `<ol class="stepper">${names.map((name, i) => {
     const n = i + 1;
     const cls = n === page ? 'current' : done[n] ? 'done' : reachable[n] ? 'open' : 'locked';
     return `${i ? '<li class="chev" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4l8 8-8 8"/></svg></li>' : ''}
       <li class="step">
-        <button class="circle ${cls} ${busy[n] ? 'busy' : ''}" data-act="goto" data-n="${n}" ${reachable[n] ? '' : 'disabled'}
+        <button class="circle ${cls} ${busy[n] ? 'busy' : ''}" data-act="${act}" data-n="${n}" ${reachable[n] ? '' : 'disabled'}
           aria-current="${n === page ? 'step' : 'false'}" aria-label="Phase ${n}: ${name}${done[n] ? ', done' : ''}">
           <span class="ph">Phase</span><span class="pn">${done[n] && n !== page ? '✓' : n}</span>
         </button>
@@ -614,6 +627,249 @@ function renderDev() {
   if (log) log.scrollTop = log.scrollHeight;
 }
 
+/* ---------- Reviews ---------- */
+const REV_PHASES = ['Pull request', 'Repository', 'Veronica review', 'Submit'];
+const BLOCKING = new Set(['blocker', 'major']);
+
+async function loadReviewPRs(quiet = false) {
+  S.reviewLoading = true; render();
+  try { S.reviewPRs = await api.reviewRequests(); S.reviewErr = ''; }
+  catch (e) { S.reviewErr = e.message; if (!quiet) alert(`Couldn't fetch review requests: ${e.message}`); }
+  S.reviewLoading = false; render();
+}
+
+function selectPR(key) {
+  const pr = S.reviewPRs.find(p => `${p.repo}#${p.number}` === key);
+  if (!pr) return;
+  cancelJob('find'); cancelJob('verify');
+  S.rev = { ...freshRev(), pr, page: 2 };
+  const same = S.repos.filter(r => r.info && r.info.origin && r.info.origin.toLowerCase() === pr.repo.toLowerCase());
+  const match = same.find(r => r.name.toLowerCase() === pr.repo.split('/')[1].toLowerCase()) || same[0]; // prefer the main clone over extra worktrees
+  if (match) selectReviewRepo(match.path);
+  else render();
+}
+
+// Fetches the PR head into a separate worktree; your checkout is not touched.
+async function selectReviewRepo(p) {
+  const r = S.rev;
+  const repo = S.repos.find(x => x.path === p);
+  if (!repo || !r.pr) return;
+  cancelJob('find'); cancelJob('verify');
+  Object.assign(r, { repo, body: null, prep: { status: 'running', msg: '', data: null }, find: idle(), verify: idle(), post: { status: 'idle', msg: '', url: '' } });
+  render();
+  try { r.prep = { status: 'done', msg: '', data: await api.prepareReview({ repo: repo.path, slug: r.pr.repo, number: r.pr.number }) }; }
+  catch (e) { r.prep = { status: 'error', msg: e.message, data: null }; }
+  render();
+}
+
+function startReview() {
+  const r = S.rev;
+  r.verify = idle(); r.body = null; r.post = { status: 'idle', msg: '', url: '' };
+  r.page = 3;
+  startJob('find', 'review-find', { pr: { ...r.prep.data, slug: r.pr.repo } });
+}
+
+// The JSON object after the marker line in a run's reply.
+function markedJson(text, marker) {
+  const t = text || '';
+  const i = t.lastIndexOf(marker);
+  if (i < 0) return null;
+  const rest = t.slice(i + marker.length);
+  try { return JSON.parse(rest.slice(rest.indexOf('{'), rest.lastIndexOf('}') + 1)); } catch { return null; }
+}
+
+function foundFindings() {
+  const j = markedJson(S.rev.find.text, 'FANG REVIEW JSON');
+  if (!j || !Array.isArray(j.findings)) return null;
+  return { summary: String(j.summary || ''), findings: j.findings.map((f, i) => ({ ...f, id: i + 1, line: Number(f.line) || null, severity: String(f.severity || 'minor').toLowerCase() })) };
+}
+
+// Every finding gets a second, skeptical run before it can be shown or posted.
+function maybeVerify() {
+  const r = S.rev;
+  const f = foundFindings();
+  if (r.find.status !== 'done' || !f || !f.findings.length) return;
+  startJob('verify', 'review-verify', { pr: { ...r.prep.data, slug: r.pr.repo }, findings: f.findings });
+}
+
+// null while running; { error } if a reply couldn't be read; otherwise the verified review.
+function reviewResult() {
+  const r = S.rev;
+  if (r.find.status !== 'done') return null;
+  const f = foundFindings();
+  if (!f) return { error: 'Veronica didn\'t return a FANG REVIEW JSON block. Run the review again.' };
+  if (!f.findings.length) return { summary: f.summary, confirmed: [], rejected: [], approved: true };
+  if (r.verify.status !== 'done') return r.verify.status === 'error' ? { error: `Verification failed: ${r.verify.error}` } : null;
+  const v = markedJson(r.verify.text, 'FANG VERIFY JSON');
+  if (!v || !Array.isArray(v.results)) return { error: 'The verifier didn\'t return a FANG VERIFY JSON block. Nothing unverified is shown. Verify again.' };
+  const byId = new Map(v.results.map(x => [Number(x.id), x]));
+  const confirmed = [], rejected = [];
+  for (const x of f.findings) {
+    const res = byId.get(x.id);
+    if (res && res.verdict === 'confirmed') confirmed.push({ ...x, line: Number(res.line) || x.line, reason: res.reason });
+    else rejected.push({ ...x, reason: res ? res.reason : 'Not checked by the verifier.' });
+  }
+  return { summary: f.summary, confirmed, rejected, approved: !confirmed.some(x => BLOCKING.has(x.severity)) };
+}
+
+// Findings on lines inside the diff become line comments; the rest go in the review body.
+function reviewDraft(res) {
+  const lines = new Map(S.rev.prep.data.files.map(f => [f.path, new Set(f.lines)]));
+  const inline = res.confirmed.filter(x => lines.get(x.path)?.has(x.line));
+  const outside = res.confirmed.filter(x => !inline.includes(x));
+  const comment = x => `**${x.severity}: ${x.title}**\n\n${x.problem}\n\n**Suggested fix:** ${x.fix}`;
+  const defaultBody = [
+    res.summary,
+    res.approved ? (res.confirmed.length ? 'Approved. A few minor notes are left inline.' : 'Approved. No issues found.') : `Not approved yet: ${res.confirmed.length} issue(s) to fix, see the comments.`,
+    ...outside.map(x => `- \`${x.path}${x.line ? ':' + x.line : ''}\` ${comment(x).replace(/\n\n/g, ' ')}`),
+    '_Reviewed with FANG (Veronica). Each finding was checked against the code by a second pass._',
+  ].filter(Boolean).join('\n\n');
+  return {
+    event: res.approved ? 'APPROVE' : 'COMMENT',
+    body: S.rev.body ?? defaultBody,
+    comments: inline.map(x => ({ path: x.path, line: x.line, body: comment(x) })),
+    outside,
+  };
+}
+
+async function postReview() {
+  const r = S.rev;
+  const d = reviewDraft(reviewResult());
+  const what = d.event === 'APPROVE' ? 'an APPROVE review' : 'a comment review (not approved)';
+  if (!confirm(`Post ${what} on ${r.pr.repo}#${r.pr.number} with ${d.comments.length} line comment(s)?\n\nThis is public on GitHub and can't be unposted from FANG.`)) return;
+  r.post = { status: 'running', msg: '', url: '' }; render();
+  try {
+    const res = await api.postReview({ slug: r.pr.repo, number: r.pr.number, headSha: r.prep.data.headSha, event: d.event, body: d.body, comments: d.comments });
+    r.post = { status: 'done', msg: `Posted (${res.state}).`, url: res.url };
+    S.reviewPRs = S.reviewPRs.filter(p => !(p.repo === r.pr.repo && p.number === r.pr.number)); // search lags behind your review
+  } catch (e) { r.post = { status: 'error', msg: e.message, url: '' }; }
+  render();
+}
+
+function revState() {
+  const r = S.rev;
+  const res = reviewResult();
+  const ready = !!res && !res.error;
+  return {
+    done: { 1: !!r.pr, 2: r.prep.status === 'done', 3: ready, 4: r.post.status === 'done' },
+    reachable: { 1: true, 2: !!r.pr, 3: r.prep.status === 'done', 4: ready },
+    busy: { 1: S.reviewLoading, 2: r.prep.status === 'running', 3: r.find.status === 'running' || r.verify.status === 'running', 4: r.post.status === 'running' },
+  };
+}
+function revGoTo(n) {
+  if (n >= 1 && n <= 4 && revState().reachable[n]) { S.rev.page = n; render(); }
+}
+
+const findingCard = (x, note) => `
+  <div class="finding ${esc(x.severity)}">
+    <div class="row"><span class="chip ${BLOCKING.has(x.severity) ? 'bad' : 'warn'}">${esc(x.severity)}</span><b>${esc(x.title)}</b></div>
+    <div class="path">${esc(x.path)}${x.line ? ':' + x.line : ''}</div>
+    <p>${esc(x.problem)}</p>
+    ${x.fix ? `<p><b>Fix:</b> ${esc(x.fix)}</p>` : ''}
+    ${note ? `<p class="sub">${esc(note)}</p>` : ''}
+  </div>`;
+
+function rev1() {
+  const r = S.rev;
+  return `
+    <div class="card-head"><h2>Pull requests waiting for your review</h2>
+      <button class="btn" data-act="rev-load" ${S.reviewLoading ? 'disabled' : ''}>${S.reviewLoading ? 'Fetching…' : 'Fetch again'}</button></div>
+    <p class="sub">Open PRs on GitHub where your review is requested.</p>
+    ${S.reviewErr ? `<div class="notice bad">${esc(S.reviewErr)}</div>` : ''}
+    ${S.reviewPRs.length ? `<div class="list">${S.reviewPRs.map(p => `
+      <button class="list-item ${r.pr && r.pr.repo === p.repo && r.pr.number === p.number ? 'selected' : ''}" data-act="rev-pr" data-key="${esc(`${p.repo}#${p.number}`)}">
+        <span class="title"><span class="tid">#${p.number}</span>${esc(p.title)}${p.draft ? ' <span class="chip">Draft</span>' : ''}</span>
+        <span class="meta">${esc(p.repo)} · by ${esc(p.author)} · ${ago(p.updated)}</span>
+      </button>`).join('')}</div>` : S.reviewLoading ? '' : '<div class="empty"><strong>Nothing waiting</strong>No open pull requests request your review.</div>'}`;
+}
+
+function rev2() {
+  const r = S.rev;
+  const p = r.prep.data;
+  const mismatch = r.repo && r.repo.info && r.repo.info.origin && r.repo.info.origin.toLowerCase() !== r.pr.repo.toLowerCase();
+  return `
+    <div class="card-head"><h2>${esc(r.pr.repo)} #${r.pr.number}</h2>${chip(r.prep.status, { running: 'Fetching PR', done: 'PR checked out', idle: 'Choose a repository' })}</div>
+    <p class="sub">${esc(r.pr.title)} · by ${esc(r.pr.author)} · <span class="path">${esc(r.pr.url)}</span></p>
+    <div class="row">
+      <label class="field"><span>Local repository</span>
+        <select id="rev-repo" data-act="rev-repo">
+          <option value="">Select a repository…</option>
+          ${S.repos.map(x => `<option value="${esc(x.path)}" ${r.repo && r.repo.path === x.path ? 'selected' : ''}>${esc(x.name)}${x.info && x.info.origin ? ` (${esc(x.info.origin)})` : ''}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+    ${!r.repo ? `<div class="notice warn">No repository in your Repositories folder has origin ${esc(r.pr.repo)}. Clone it there, press Fetch again in Repositories, or pick one by hand.</div>` : ''}
+    ${mismatch ? `<div class="notice warn">This repository's origin is ${esc(r.repo.info.origin)}, not ${esc(r.pr.repo)}. Fetching the PR will likely fail.</div>` : ''}
+    ${r.prep.status === 'error' ? `<div class="notice bad">${esc(r.prep.msg)}</div>` : ''}
+    ${p ? `<div class="checks" style="margin-top:12px">
+      <span class="chip">${esc(p.headRef)} → ${esc(p.base)}</span>
+      <span class="chip">${p.files.length} file(s)</span>
+      <span class="chip">${esc(p.headSha.slice(0, 8))}</span>
+      ${p.localHead !== p.headSha ? '<span class="chip warn">Fetched head differs from GitHub. Pick the repository again to refetch.</span>' : ''}
+    </div>
+    <p class="sub" style="margin-top:8px">Checked out read-only at <span class="path">${esc(p.worktree)}</span>. Your own branch and changes are not touched.</p>` : ''}`;
+}
+
+function rev3() {
+  const r = S.rev;
+  const res = reviewResult();
+  const running = r.find.status === 'running' || r.verify.status === 'running';
+  return `
+    <div class="card-head"><h2>Veronica review</h2>
+      <div class="row">${cost(r.find)}${cost(r.verify)}
+      ${r.find.status === 'running' ? chip('running', { running: 'Veronica reviewing' }) : r.verify.status === 'running' ? chip('running', { running: 'Verifying findings' }) : res && !res.error ? `<span class="chip ${res.approved ? 'ok' : 'bad'}">${res.approved ? 'Approved' : 'Not approved'}</span>` : ''}</div>
+    </div>
+    <p class="sub">Veronica reviews read-only. A second run then checks every finding against the code and drops anything it can't confirm.</p>
+    <div class="row">
+      ${running ? `<button class="btn danger" data-act="cancel" data-key="${r.find.status === 'running' ? 'find' : 'verify'}">Stop</button>`
+        : `<button class="btn primary" data-act="rev-start" ${r.prep.status === 'done' ? '' : 'disabled'}>${r.find.status === 'idle' ? 'Review with Veronica' : 'Review again'}</button>`}
+      ${!running && r.find.status === 'done' && ['error', 'cancelled'].includes(r.verify.status) || res && /verifier/.test(res.error || '') ? '<button class="btn ghost" data-act="rev-verify">Verify again</button>' : ''}
+    </div>
+    ${logBox('find', r.find)}${err(r.find)}${logBox('verify', r.verify)}
+    ${res && res.error ? `<div class="notice bad">${esc(res.error)}</div>` : ''}
+    ${res && !res.error ? `
+      ${res.summary ? `<p style="margin-top:12px">${esc(res.summary)}</p>` : ''}
+      <h3>What to fix</h3>
+      ${res.confirmed.length ? res.confirmed.map(x => findingCard(x, x.reason && `Verified: ${x.reason}`)).join('') : '<div class="notice ok">None. Nothing to fix.</div>'}
+      ${res.rejected.length ? `<details><summary>${res.rejected.length} finding(s) dropped as unverified</summary>${res.rejected.map(x => findingCard(x, `Dropped: ${x.reason}`)).join('')}</details>` : ''}` : ''}`;
+}
+
+function rev4() {
+  const r = S.rev;
+  const res = reviewResult();
+  const d = reviewDraft(res);
+  return `
+    <div class="card-head"><h2>Submit the review</h2><span class="chip ${res.approved ? 'ok' : 'bad'}">${res.approved ? 'Approve' : 'Comment (not approved)'}</span></div>
+    <p class="sub">${res.approved ? 'Posts an approving review.' : 'Posts a comment review with a comment on each issue. It doesn\'t block merging.'} Nothing is posted until you press Post review.</p>
+    <label class="field"><span>Review summary</span><textarea id="rev-body" rows="8" ${r.post.status === 'done' ? 'disabled' : ''}>${esc(d.body)}</textarea></label>
+    ${d.comments.length ? `<h3>${d.comments.length} line comment(s)</h3>${d.comments.map(c => `<div class="finding"><div class="path">${esc(c.path)}:${c.line}</div><pre>${esc(c.body)}</pre></div>`).join('')}` : ''}
+    ${d.outside.length ? `<div class="notice warn">${d.outside.length} finding(s) point at lines outside the diff, so GitHub can't take them as line comments. They're listed in the summary instead.</div>` : ''}
+    ${r.post.status === 'error' ? `<div class="notice bad">${esc(r.post.msg)}</div>` : ''}
+    ${r.post.status === 'done' ? `<div class="notice ok">${esc(r.post.msg)} ${esc(r.post.url)}</div>` : `
+    <div class="row end" style="margin-top:12px">
+      <button class="btn primary big" data-act="rev-post" ${r.post.status === 'running' ? 'disabled' : ''}>${r.post.status === 'running' ? 'Posting…' : res.approved ? 'Post approval' : 'Post comments'}</button>
+    </div>`}`;
+}
+
+function renderReviews() {
+  const v = $('#view-reviews');
+  const r = S.rev;
+  const n = r.page;
+  const st = revState();
+  const body = [rev1, rev2, rev3, rev4][n - 1]();
+  const nextOk = n < 4 && st.reachable[n + 1];
+  v.innerHTML = `
+    <div class="view-head"><div><h1>Reviews</h1><p>Pull requests assigned to you, reviewed by Veronica, verified, then posted by you.</p></div></div>
+    ${stepper(REV_PHASES, n, st, 'rev-goto')}
+    <div class="card phase-card">${body}</div>
+    <div class="pager">
+      <button class="btn" data-act="rev-back" ${n === 1 ? 'disabled' : ''}>Back</button>
+      <span class="pager-pos">Phase ${n} of 4 · ${REV_PHASES[n - 1]}</span>
+      ${n < 4 ? `<button class="btn primary" data-act="rev-next" ${nextOk ? '' : 'disabled'}>Next: ${REV_PHASES[n]}</button>` : `<button class="btn primary" data-act="rev-new" ${r.post.status === 'running' ? 'disabled' : ''}>Review another PR</button>`}
+    </div>`;
+  v.querySelectorAll('.log').forEach(l => { l.scrollTop = l.scrollHeight; });
+}
+
 /* ---------- Events ---------- */
 document.addEventListener('click', e => {
   const nav = e.target.closest('.nav-item');
@@ -641,6 +897,15 @@ document.addEventListener('click', e => {
   else if (a === 'load-changes') loadChanges();
   else if (a === 'diff') showDiff(el.dataset.file);
   else if (a === 'new-ticket') newTicket();
+  else if (a === 'rev-load') loadReviewPRs();
+  else if (a === 'rev-pr') selectPR(el.dataset.key);
+  else if (a === 'rev-start') startReview();
+  else if (a === 'rev-verify') maybeVerify();
+  else if (a === 'rev-post') postReview();
+  else if (a === 'rev-goto') revGoTo(Number(el.dataset.n));
+  else if (a === 'rev-next') revGoTo(S.rev.page + 1);
+  else if (a === 'rev-back') revGoTo(S.rev.page - 1);
+  else if (a === 'rev-new') { cancelJob('find'); cancelJob('verify'); S.rev = freshRev(); loadReviewPRs(); }
 });
 
 document.addEventListener('change', e => {
@@ -649,6 +914,7 @@ document.addEventListener('change', e => {
   else if (a === 'dev-repo' && e.target.value) selectRepo(e.target.value);
   else if (a === 'branch-base') { S.dev.branch.base = e.target.value; render(); }
   else if (a === 'branch-fetch') { S.dev.branch.fetch = e.target.checked; }
+  else if (a === 'rev-repo' && e.target.value) selectReviewRepo(e.target.value);
 });
 
 document.addEventListener('input', e => {
@@ -656,6 +922,7 @@ document.addEventListener('input', e => {
   else if (e.target.id === 'dev-branch') { S.dev.branch.name = e.target.value; S.dev.branch.auto = false; }
   else if (e.target.id === 'dev-notes') { S.dev.notes = e.target.value; }
   else if (e.target.id === 'impl-answer') { S.dev.impl.answer = e.target.value; }
+  else if (e.target.id === 'rev-body') { S.rev.body = e.target.value; }
 });
 
 /* ---------- Settings ---------- */
@@ -697,8 +964,13 @@ const VOICE_ACTS = {
   replan: 'replan', 're plan': 'replan', cancel: 'cancel', stop: 'cancel',
   refresh: 'load-changes', 'refresh changes': 'load-changes', 'send answer': 'continue-impl', continue: 'continue-impl',
   'develop another ticket': 'new-ticket', 'another ticket': 'new-ticket', 'new ticket': 'new-ticket', 'next ticket': 'new-ticket',
+  'fetch reviews': 'rev-load', 'fetch pull requests': 'rev-load', 'review with veronica': 'rev-start', 'start review': 'rev-start',
+  'review again': 'rev-start', 'verify again': 'rev-verify', 'post review': 'rev-post', 'post approval': 'rev-post',
+  'post comments': 'rev-post', 'review another': 'rev-new', 'review another pr': 'rev-new', 'next review': 'rev-new',
 };
-const VOICE_VIEWS = { tickets: 'tickets', repositories: 'repos', repos: 'repos', development: 'dev' };
+// On the Reviews screen, "next", "back" and "phase N" move through the review phases.
+const REV_ACTS = { next: 'rev-next', back: 'rev-back' };
+const VOICE_VIEWS = { tickets: 'tickets', repositories: 'repos', repos: 'repos', development: 'dev', reviews: 'reviews' };
 
 // mood is for the companion: thinking (listening/transcribing), happy (handled), idle, error.
 function voiceStatus(text, mood = 'idle') {
@@ -774,19 +1046,28 @@ function voiceRun(text) {
     if (!t) return ' · no matching ticket';
     selectTicket(t.uid); return '';
   }
+  if ((m = said.match(new RegExp(`^review (?:pr ?|p r |pull request |number )?(\\d+|${Object.keys(NUM).join('|')})$`)))) {
+    const n = NUM[m[1]] || Number(m[1]);
+    const pr = S.reviewPRs.find(p => p.number === n);
+    if (!pr) return ' · no pull request with that number waiting for you';
+    S.view = 'reviews'; selectPR(`${pr.repo}#${pr.number}`); return '';
+  }
   if ((m = said.match(/^(?:use |open |select )?(?:repo|repository) (.+)$/))) {
     const q = flat(m[1]);
     const r = S.repos.find(x => flat(x.name) === q) || S.repos.find(x => flat(x.name).includes(q));
     if (!r) return ' · no matching repository';
-    selectRepo(r.path); return '';
+    if (S.view === 'reviews' && S.rev.pr) selectReviewRepo(r.path); else selectRepo(r.path);
+    return '';
   }
   if ((m = said.match(/^(?:go to )?(?:phase|step) (\w+)$/))) {
+    const n = NUM[m[1]] || Number(m[1]);
+    if (S.view === 'reviews') { revGoTo(n); return ''; }
     if (S.view !== 'dev') { S.view = 'dev'; render(); }
-    goTo(NUM[m[1]] || Number(m[1])); return '';
+    goTo(n); return '';
   }
   const view = VOICE_VIEWS[said.replace(/^(?:go to|show|open) /, '')];
   if (view) { S.view = view; render(); return ''; }
-  const act = VOICE_ACTS[said];
+  const act = (S.view === 'reviews' && REV_ACTS[VOICE_ACTS[said]]) || VOICE_ACTS[said];
   if (!act) return ' · not a command';
   const btn = document.querySelector(`.view.active [data-act="${act}"]:not([disabled])`);
   if (!btn) return ' · not available here';
@@ -809,6 +1090,6 @@ api.onJobEvent(onJobEvent);
   S.settings = await api.getSettings();
   render();
   checkClaude();
-  await Promise.all([loadTickets(), loadRepos()]);
+  await Promise.all([loadTickets(), loadRepos(), loadReviewPRs(true)]);
   render();
 })();
